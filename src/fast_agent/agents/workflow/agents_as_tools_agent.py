@@ -407,7 +407,7 @@ class AgentsAsToolsAgent(McpAgent):
         properties = configured_schema.get("properties")
         if not isinstance(properties, dict):
             return True
-        return "message" not in properties
+        return set(properties.keys()) != {"message"}
 
     @staticmethod
     def _render_structured_args(arguments: dict[str, Any]) -> str:

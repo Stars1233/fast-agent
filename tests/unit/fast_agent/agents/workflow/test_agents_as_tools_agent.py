@@ -402,6 +402,68 @@ async def test_invoke_child_uses_structured_json_input_for_custom_schema():
 
 
 @pytest.mark.asyncio
+async def test_invoke_child_uses_structured_json_input_for_mixed_message_schema():
+    child = StructuredInputChild("child")
+    child.config.tool_input_schema = {
+        "type": "object",
+        "properties": {
+            "message": {
+                "type": "string",
+                "description": "User message context",
+            },
+            "query": {
+                "type": "string",
+                "description": "What to investigate",
+            },
+            "filters": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+        },
+        "required": ["query"],
+    }
+
+    agent = AgentsAsToolsAgent(AgentConfig("parent"), [child])
+    await agent.initialize()
+
+    result = await agent._invoke_child_agent(
+        child,
+        {"message": "context", "query": "find updates", "filters": ["docs", "code"]},
+    )
+
+    assert result.isError is False
+    assert child.last_input_text is not None
+    assert json.loads(child.last_input_text) == {
+        "message": "context",
+        "query": "find updates",
+        "filters": ["docs", "code"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_invoke_child_uses_legacy_message_input_for_message_only_schema():
+    child = StructuredInputChild("child")
+    child.config.tool_input_schema = {
+        "type": "object",
+        "properties": {
+            "message": {
+                "type": "string",
+                "description": "Message to send to the agent",
+            },
+        },
+        "required": ["message"],
+    }
+
+    agent = AgentsAsToolsAgent(AgentConfig("parent"), [child])
+    await agent.initialize()
+
+    result = await agent._invoke_child_agent(child, {"message": "hello child"})
+
+    assert result.isError is False
+    assert child.last_input_text == "hello child"
+
+
+@pytest.mark.asyncio
 async def test_run_tools_emits_progress_for_child_agent():
     child = HookedChildAgent("child")
     agent = AgentsAsToolsAgent(AgentConfig("parent"), [child])
