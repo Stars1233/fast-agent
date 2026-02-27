@@ -25,6 +25,8 @@ Current agent identity:
 
 Use the smart tool to load AgentCards temporarily when you need extra agents.
 Use validate to check AgentCard files before running them.
+When calling child-agent tools (`agent__*`), follow each tool's schema and
+parameter descriptions exactly.
 When a card needs MCP servers that are not preconfigured in `fastagent.config.yaml`,
 declare them with `mcp_connect` entries (`target` + optional `name`). Prefer explicit
 `name` values when collisions are possible.

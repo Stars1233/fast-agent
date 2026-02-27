@@ -26,8 +26,8 @@ The "Agents as Tools" pattern simplifies this by:
   based on its instruction and context, without hardcoded routing logic
 - **Parallel execution**: Multiple child agents can run concurrently when the LLM makes
   parallel tool calls
-- **Clean abstraction**: Child agents expose a minimal schema (single `message` parameter),
-  making them universally composable
+- **Clean abstraction**: Child agents expose tool schemas to the parent LLM. Cards can
+  provide a child-owned `tool_input_schema`; otherwise a minimal default schema is used.
 
 Benefits over iterative_planner/orchestrator:
 - Simpler codebase: No custom planning loops or routing tables
@@ -40,7 +40,8 @@ Algorithm
 1. **Initialization**
    - `AgentsAsToolsAgent` is itself an `McpAgent` (with its own MCP servers + tools) and receives a list of **child agents**.
    - Each child agent is mapped to a synthetic tool name: `agent__{child_name}`.
-   - Child tool schemas accept a single `message` string parameter.
+   - Child tool schemas come from child cards (`tool_input_schema`) when set;
+     otherwise the fallback schema accepts a single `message` string.
 
 2. **Tool Discovery (list_tools)**
    - `list_tools()` starts from the base `McpAgent.list_tools()` (MCP + local tools).
@@ -186,6 +187,7 @@ References
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import contextmanager, nullcontext
 from copy import copy
 from dataclasses import dataclass
@@ -373,6 +375,44 @@ class AgentsAsToolsAgent(McpAgent):
             kwargs["child_message_files"] = self._child_message_files
         return kwargs
 
+    @staticmethod
+    def _default_child_tool_schema() -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "Message to send to the agent",
+                },
+            },
+            "required": ["message"],
+        }
+
+    @staticmethod
+    def _configured_child_tool_schema(child: LlmAgent) -> dict[str, Any] | None:
+        config = getattr(child, "config", None)
+        schema = getattr(config, "tool_input_schema", None) if config is not None else None
+        return schema if isinstance(schema, dict) else None
+
+    def _resolved_child_tool_schema(self, child: LlmAgent) -> dict[str, Any]:
+        configured_schema = self._configured_child_tool_schema(child)
+        if configured_schema is not None:
+            return configured_schema
+        return self._default_child_tool_schema()
+
+    def _child_uses_structured_args(self, child: LlmAgent) -> bool:
+        configured_schema = self._configured_child_tool_schema(child)
+        if configured_schema is None:
+            return False
+        properties = configured_schema.get("properties")
+        if not isinstance(properties, dict):
+            return True
+        return "message" not in properties
+
+    @staticmethod
+    def _render_structured_args(arguments: dict[str, Any]) -> str:
+        return json.dumps(arguments, ensure_ascii=False, sort_keys=True, default=str)
+
     async def list_tools(self) -> ListToolsResult:
         """List MCP tools plus child agents exposed as tools."""
 
@@ -391,13 +431,7 @@ class AgentsAsToolsAgent(McpAgent):
             if not description:
                 description = agent.instruction
 
-            input_schema: dict[str, Any] = {
-                "type": "object",
-                "properties": {
-                    "message": {"type": "string", "description": "Message to send to the agent"},
-                },
-                "required": ["message"],
-            }
+            input_schema = self._resolved_child_tool_schema(agent)
             tools.append(
                 Tool(
                     name=tool_name,
@@ -475,8 +509,10 @@ class AgentsAsToolsAgent(McpAgent):
         """Shared helper to execute a child agent with standard serialization and display rules."""
 
         args = arguments or {}
-        # Extract message from arguments
-        if isinstance(args.get("message"), str):
+        if self._child_uses_structured_args(child):
+            input_text = self._render_structured_args(args)
+        # Extract message from arguments for legacy child tool schemas.
+        elif isinstance(args.get("message"), str):
             input_text = args["message"]
         elif isinstance(args.get("text"), str):  # backwards compat
             input_text = args["text"]

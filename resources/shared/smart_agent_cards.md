@@ -27,6 +27,9 @@
   - entries require `target` and may include optional `name`.
   - target forms: `https://...`, `@scope/pkg`, `npx ...`, `uvx ...`, or stdio command.
 - `agents` — list of child agents (Agents-as-Tools).
+- `tool_input_schema` — optional JSON Schema for this card when exposed as `agent__<name>`.
+  - If omitted, parent agents use the legacy `message: string` tool schema.
+  - Use `properties.<param>.description` for clear parameter guidance.
 - `use_history` — bool (default `true`).
 - `messages` — path or list of history files (relative to card directory).
 - `request_params` — request/model overrides.

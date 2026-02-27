@@ -222,3 +222,21 @@ def test_scan_agent_cards_reports_invalid_shell_cwd_type(tmp_path: Path) -> None
     results = scan_agent_card_directory(tmp_path)
     assert len(results) == 1
     assert "'cwd' must be a string" in results[0].errors
+
+
+def test_scan_agent_cards_reports_invalid_tool_input_schema(tmp_path: Path) -> None:
+    card_path = tmp_path / "agent.yaml"
+    card_path.write_text(
+        "\n".join(
+            [
+                "name: schema_agent",
+                "tool_input_schema:",
+                "  type: array",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    results = scan_agent_card_directory(tmp_path)
+    assert len(results) == 1
+    assert any("tool_input_schema" in err and "type" in err for err in results[0].errors)

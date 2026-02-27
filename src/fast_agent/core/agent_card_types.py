@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 class AgentCardData(TypedDict, total=False):
     config: AgentConfig
+    tool_input_schema: dict[str, Any] | None
     type: str
     func: object | None
     source_path: str

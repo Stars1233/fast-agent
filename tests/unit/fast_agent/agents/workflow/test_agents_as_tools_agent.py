@@ -1,4 +1,5 @@
 import asyncio
+import json
 from collections.abc import Sequence
 from typing import Any
 from unittest.mock import AsyncMock
@@ -83,6 +84,29 @@ class FakeChildAgent(LlmAgent):
         # Mutate name for instance labelling; reuse self to keep the stub small.
         self._name = name or self.name
         return self
+
+
+class StructuredInputChild(FakeChildAgent):
+    def __init__(self, name: str, response_text: str = "ok") -> None:
+        super().__init__(name, response_text=response_text)
+        self.last_input_text: str | None = None
+
+    async def generate(
+        self,
+        messages: str
+        | PromptMessage
+        | PromptMessageExtended
+        | Sequence[str | PromptMessage | PromptMessageExtended],
+        request_params: RequestParams | None = None,
+        tools: list[Tool] | None = None,
+    ) -> PromptMessageExtended:
+        if isinstance(messages, Sequence) and messages:
+            first_message = messages[0]
+            if isinstance(first_message, PromptMessageExtended) and first_message.content:
+                first_block = first_message.content[0]
+                if isinstance(first_block, TextContent):
+                    self.last_input_text = first_block.text
+        return await super().generate(messages, request_params=request_params, tools=tools)
 
 
 class ErrorChannelChild(FakeChildAgent):
@@ -276,6 +300,28 @@ async def test_list_tools_merges_base_and_child():
 
 
 @pytest.mark.asyncio
+async def test_list_tools_uses_child_tool_input_schema():
+    child = FakeChildAgent("child")
+    child.config.tool_input_schema = {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "What to investigate",
+            },
+        },
+        "required": ["query"],
+    }
+    agent = AgentsAsToolsAgent(AgentConfig("parent"), [child])
+    await agent.initialize()
+
+    result = await agent.list_tools()
+    child_tool = next(tool for tool in result.tools if tool.name == "agent__child")
+
+    assert child_tool.inputSchema == child.config.tool_input_schema
+
+
+@pytest.mark.asyncio
 async def test_run_tools_respects_max_parallel_and_timeout():
     fast_child = FakeChildAgent("fast", response_text="fast")
     slow_child = FakeChildAgent("slow", response_text="slow", delay=0.05)
@@ -319,6 +365,40 @@ async def test_run_tools_respects_max_parallel_and_timeout():
         isinstance(block, TextContent) and "Tool execution failed" in (block.text or "")
         for block in err_res.content
     )
+
+
+@pytest.mark.asyncio
+async def test_invoke_child_uses_structured_json_input_for_custom_schema():
+    child = StructuredInputChild("child")
+    child.config.tool_input_schema = {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "What to investigate",
+            },
+            "sources": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+        },
+        "required": ["query"],
+    }
+
+    agent = AgentsAsToolsAgent(AgentConfig("parent"), [child])
+    await agent.initialize()
+
+    result = await agent._invoke_child_agent(
+        child,
+        {"query": "find updates", "sources": ["docs.fast-agent.ai"]},
+    )
+
+    assert result.isError is False
+    assert child.last_input_text is not None
+    assert json.loads(child.last_input_text) == {
+        "query": "find updates",
+        "sources": ["docs.fast-agent.ai"],
+    }
 
 
 @pytest.mark.asyncio

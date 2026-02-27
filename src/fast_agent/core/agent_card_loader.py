@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable
@@ -13,6 +14,7 @@ from fast_agent.agents.agent_types import AgentConfig, AgentType, MCPConnectTarg
 from fast_agent.constants import DEFAULT_AGENT_INSTRUCTION, SMART_AGENT_INSTRUCTION
 from fast_agent.core.direct_decorators import _resolve_instruction
 from fast_agent.core.exceptions import AgentConfigError
+from fast_agent.core.tool_input_schema import validate_tool_input_schema
 from fast_agent.skills import SKILLS_DEFAULT
 from fast_agent.types import RequestParams
 
@@ -57,6 +59,7 @@ _AGENT_FIELDS = {
     "tool_hooks",
     "lifecycle_hooks",
     "trim_tool_history",
+    "tool_input_schema",
     "messages",
     "shell",
     "cwd",
@@ -484,6 +487,7 @@ def _build_agent_data(
         )
 
     api_key = raw.get("api_key")
+    tool_input_schema = _ensure_tool_input_schema(raw.get("tool_input_schema"), path)
 
     # Parse function_tools - can be a string or list of strings
     function_tools_raw = raw.get("function_tools")
@@ -535,6 +539,7 @@ def _build_agent_data(
         name=name,
         instruction=instruction,
         description=description,
+        tool_input_schema=tool_input_schema,
         servers=servers,
         tools=tools,
         resources=resources,
@@ -785,6 +790,25 @@ def _ensure_request_params(value: Any, path: Path) -> RequestParams | None:
         raise AgentConfigError(f"Invalid request_params in {path}", str(exc)) from exc
 
 
+def _ensure_tool_input_schema(value: Any, path: Path) -> dict[str, Any] | None:
+    validation = validate_tool_input_schema(value)
+    if validation.errors:
+        details = "; ".join(validation.errors)
+        raise AgentConfigError(
+            f"Invalid 'tool_input_schema' in {path}",
+            details,
+        )
+
+    for warning_message in validation.warnings:
+        warnings.warn(
+            f"{path}: tool_input_schema {warning_message}",
+            UserWarning,
+            stacklevel=3,
+        )
+
+    return validation.normalized
+
+
 def _agents_as_tools_options(raw: dict[str, Any], path: Path) -> dict[str, Any]:
     options: dict[str, Any] = {}
     history_source = raw.get("history_source")
@@ -926,6 +950,9 @@ def _build_card_dump(
 
     if config.description and "description" in allowed_fields:
         card["description"] = config.description
+
+    if config.tool_input_schema is not None and "tool_input_schema" in allowed_fields:
+        card["tool_input_schema"] = config.tool_input_schema
 
     if config.model and "model" in allowed_fields:
         card["model"] = config.model

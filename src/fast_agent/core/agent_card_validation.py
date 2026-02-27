@@ -13,6 +13,7 @@ from frontmatter import loads as load_frontmatter
 
 from fast_agent.agents.agent_types import AgentType
 from fast_agent.core.exceptions import AgentConfigError, format_fast_agent_error
+from fast_agent.core.tool_input_schema import validate_tool_input_schema
 from fast_agent.core.validation import find_dependency_cycle
 from fast_agent.mcp.connect_targets import resolve_target_entry
 
@@ -184,6 +185,7 @@ def _scan_agent_card_files(
         _validate_mcp_connect_entries(raw.get("mcp_connect"), errors)
         function_tools = _ensure_str_list(raw.get("function_tools"), "function_tools", errors)
         messages = _ensure_str_list(raw.get("messages"), "messages", errors)
+        _validate_tool_input_schema(raw.get("tool_input_schema"), errors)
         shell_cwd = _resolve_shell_cwd(raw.get("cwd"), errors)
         dependencies = _card_dependencies(type_key, raw, errors)
 
@@ -493,6 +495,12 @@ def _resolve_shell_cwd(value: Any, errors: list[str]) -> Path | None:
     if configured.is_absolute():
         return configured.resolve()
     return (Path.cwd() / configured).resolve()
+
+
+def _validate_tool_input_schema(value: Any, errors: list[str]) -> None:
+    validation = validate_tool_input_schema(value)
+    for error in validation.errors:
+        errors.append(f"'tool_input_schema' {error}")
 
 
 def _validate_shell_cwd(cwd: Path, errors: list[str]) -> None:

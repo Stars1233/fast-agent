@@ -159,3 +159,102 @@ def test_load_agent_card_rejects_mcp_connect_missing_target(tmp_path: Path) -> N
 
     with pytest.raises(AgentConfigError, match="mcp_connect\\[0\\]\\.target"):
         load_agent_cards(card_path)
+
+
+def test_load_agent_card_parses_tool_input_schema(tmp_path: Path) -> None:
+    card_path = tmp_path / "schema_agent.yaml"
+    card_path.write_text(
+        "\n".join(
+            [
+                "name: schema_agent",
+                "tool_input_schema:",
+                "  type: object",
+                "  properties:",
+                "    query:",
+                '      type: string',
+                '      description: "What to investigate"',
+                "  required:",
+                "    - query",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = load_agent_cards(card_path)
+    config = loaded[0].agent_data["config"]
+    assert config.tool_input_schema == {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "What to investigate",
+            },
+        },
+        "required": ["query"],
+    }
+
+
+def test_load_agent_card_rejects_invalid_tool_input_schema(tmp_path: Path) -> None:
+    card_path = tmp_path / "bad_schema_agent.yaml"
+    card_path.write_text(
+        "\n".join(
+            [
+                "name: bad_schema_agent",
+                "tool_input_schema:",
+                "  type: array",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AgentConfigError, match="tool_input_schema"):
+        load_agent_cards(card_path)
+
+
+def test_load_agent_card_warns_when_required_property_description_missing(tmp_path: Path) -> None:
+    card_path = tmp_path / "warn_schema_agent.yaml"
+    card_path.write_text(
+        "\n".join(
+            [
+                "name: warn_schema_agent",
+                "tool_input_schema:",
+                "  type: object",
+                "  properties:",
+                "    query:",
+                "      type: string",
+                "  required:",
+                "    - query",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.warns(UserWarning, match="required property 'query'"):
+        load_agent_cards(card_path)
+
+
+def test_dump_agent_card_preserves_tool_input_schema(tmp_path: Path) -> None:
+    card_path = tmp_path / "schema_agent.yaml"
+    card_path.write_text(
+        "\n".join(
+            [
+                "name: schema_agent",
+                "tool_input_schema:",
+                "  type: object",
+                "  properties:",
+                "    query:",
+                '      type: string',
+                '      description: "What to investigate"',
+                "  required:",
+                "    - query",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    loaded = load_agent_cards(card_path)
+    dumped = dump_agent_to_string("schema_agent", loaded[0].agent_data, as_yaml=True)
+
+    assert "tool_input_schema:" in dumped
+    assert "query:" in dumped
+    assert "required:" in dumped
