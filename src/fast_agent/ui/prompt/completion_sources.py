@@ -597,27 +597,18 @@ def command_completions(
     if text_lower.startswith("/mcp session "):
         remainder = text[len("/mcp session ") :]
         parts = remainder.split(maxsplit=1) if remainder else []
+        subcommands = {
+            "list": "List sessions (all connected servers by default) and highlight active",
+            "jar": "Show all stored sessions grouped by target/mcp name",
+            "new": "Create a new MCP session",
+            "use": "Switch active session to an existing session id",
+            "clear": "Clear one session entry or the full local store",
+        }
+        results = list(completer._complete_subcommands(parts, remainder, subcommands))
+        if not parts or (len(parts) == 1 and not remainder.endswith(" ")):
+            return results
 
-        attached: list[str] = []
-        if completer.agent_provider is not None and completer.current_agent:
-            try:
-                agent = completer.agent_provider._agent(completer.current_agent)
-                aggregator = getattr(agent, "aggregator", None)
-                list_attached = getattr(aggregator, "list_attached_servers", None)
-                if callable(list_attached):
-                    attached = list_attached()
-            except Exception:
-                attached = []
-
-        if not parts:
-            subcommands = {
-                "list": "List sessions for a server/mcp name and highlight active session",
-                "jar": "Show all stored sessions grouped by target/mcp name",
-                "new": "Create a new MCP session",
-                "use": "Switch active session to an existing session id",
-                "clear": "Clear one session entry or the full local store",
-            }
-            return list(completer._complete_subcommands(parts, remainder, subcommands))
+        attached = _attached_mcp_servers_for_completion(completer)
 
         subcmd = parts[0].lower()
         tail = parts[1] if len(parts) > 1 else ""
@@ -678,10 +669,10 @@ def command_completions(
                                 completion_text,
                                 start_position=0,
                                 display=display,
-                        display_meta=f"{state} session | {meta_text}",
+                                display_meta=f"{state} session | {meta_text}",
                             )
                         )
-                    return completions
+                return completions
 
             if len(tail_tokens) <= 1 and not tail.endswith(" "):
                 server_completions = [

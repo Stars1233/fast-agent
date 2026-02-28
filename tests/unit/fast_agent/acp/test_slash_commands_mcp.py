@@ -25,6 +25,7 @@ class _Agent:
                     server_name="local",
                     server_identity="demo-server",
                     target="cmd:python demo.py",
+                    target=None,
                     cookie={"id": "sess-1"},
                     cookies=(
                         {
@@ -263,4 +264,5 @@ async def test_slash_command_mcp_session_jar() -> None:
     rendered = await handler.execute_command("mcp", "session jar")
     assert "[ 1]" in rendered
     assert "connected" in rendered
-    assert "session: sess-1" in rendered
+    assert "cookies: 1" in rendered
+    assert "▶ sess-1" in rendered

@@ -66,6 +66,18 @@ class JsonFileSessionCookieStore:
     def __init__(self, path: Path | str) -> None:
         self._path = Path(path)
 
+    @property
+    def path(self) -> Path:
+        return self._path
+
+    def size_bytes(self) -> int | None:
+        try:
+            if not self._path.exists():
+                return None
+            return self._path.stat().st_size
+        except Exception:
+            return None
+
     @classmethod
     def from_environment(cls) -> JsonFileSessionCookieStore:
         env_paths = resolve_environment_paths(override=os.getenv("ENVIRONMENT_DIR"))
@@ -149,6 +161,18 @@ class ExperimentalSessionClient:
     ) -> None:
         self._aggregator = aggregator
         self._cookie_store = cookie_store or JsonFileSessionCookieStore.from_environment()
+
+    def store_size_bytes(self) -> int | None:
+        sized_store = getattr(self._cookie_store, "size_bytes", None)
+        if not callable(sized_store):
+            return None
+        try:
+            value = sized_store()
+        except Exception:
+            return None
+        if isinstance(value, int) and value >= 0:
+            return value
+        return None
 
     async def list_jar(self) -> list[SessionJarEntry]:
         status_map = await self._aggregator.collect_server_status()
@@ -886,6 +910,7 @@ class ExperimentalSessionClient:
                 {
                     "id": session_id,
                     "title": cls._extract_cookie_title(payload),
+                    "cookieSizeBytes": cls._cookie_size_bytes(payload),
                     "expiry": (
                         payload.get(_EXPIRY_KEY)
                         if isinstance(payload.get(_EXPIRY_KEY), str)
@@ -900,6 +925,14 @@ class ExperimentalSessionClient:
             )
         summaries.sort(key=lambda value: str(value.get("updatedAt") or ""), reverse=True)
         return tuple(summaries)
+
+    @staticmethod
+    def _cookie_size_bytes(payload: dict[str, Any]) -> int:
+        try:
+            encoded = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        except Exception:
+            return 0
+        return len(encoded)
 
     @staticmethod
     def _is_cookie_invalidated(item: dict[str, Any]) -> bool:
