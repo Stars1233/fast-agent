@@ -449,12 +449,15 @@ def _render_jar_entry(entry: SessionJarEntry) -> str:
     supported = (
         "yes" if entry.supported is True else "no" if entry.supported is False else "unknown"
     )
-    identity = entry.server_identity or "(unset)"
+    mcp_name = entry.server_identity or "(unset)"
+    target = entry.target or "(unset)"
     title = entry.title or "(none)"
 
     return (
         f"server={entry.server_name}\n"
-        f"identity={identity}\n"
+        f"target={target}\n"
+        f"session={_extract_cookie_id(entry.cookie) or '-'}\n"
+        f"mcp_name={mcp_name}\n"
         f"exp_session_supported={supported}\n"
         f"features={features}\n"
         f"title={title}\n"
@@ -579,7 +582,7 @@ def _render_jar_table(entries: list[SessionJarEntry]) -> Text:
 
     grouped: dict[str, list[SessionJarEntry]] = {}
     for entry in entries:
-        key = entry.server_identity or entry.server_name
+        key = entry.target or entry.server_identity or entry.server_name
         grouped.setdefault(key, []).append(entry)
 
     labels = sorted(grouped)
@@ -676,7 +679,15 @@ def _render_jar_table(entries: list[SessionJarEntry]) -> Text:
 
         header = Text()
         header.append(f"[{index:>{index_width}}] ", style="dim cyan")
-        header.append(_truncate_cell(label, max_len=30), style="white")
+        target_reserved = (
+            len(f"[{index:>{index_width}}] ")
+            + len(" • ")
+            + len(connection_state)
+            + len(" • ")
+            + len(capability_display)
+        )
+        target_width = max(24, width - target_reserved)
+        header.append(_truncate_cell(label, max_len=target_width), style="white")
         header.append(" • ", style="dim")
         header.append(
             connection_state,
@@ -691,8 +702,15 @@ def _render_jar_table(entries: list[SessionJarEntry]) -> Text:
         content.append("\n")
 
         meta = Text()
-        meta.append("active: ", style="dim")
+        mcp_name_display = primary.server_identity or "-"
+        cookie_id_reserved = len("session: ") + len(active_display)
+        mcp_reserved = len(" • mcp name: ") + len(" • cookies: ") + len(str(cookie_count))
+        mcp_name_width = max(14, width - cookie_id_reserved - mcp_reserved)
+        meta.append("session: ", style="dim")
         meta.append(active_display, style="white")
+        meta.append(" • ", style="dim")
+        meta.append("mcp name: ", style="dim")
+        meta.append(_truncate_cell(mcp_name_display, max_len=mcp_name_width), style="white")
         meta.append(" • ", style="dim")
         meta.append("cookies: ", style="dim")
         meta.append(str(cookie_count), style="white")
@@ -791,7 +809,7 @@ def _render_server_cookies_table(
 
     content.append("\n")
     content.append("▎• ", style="dim")
-    content.append("identity: ", style="dim")
+    content.append("mcp name: ", style="dim")
     content.append(server_identity or "-", style="white")
     content.append(" • ", style="dim")
     content.append("cookies: ", style="dim")
@@ -1181,7 +1199,7 @@ async def handle_mcp_connect(
             outcome.add_message(
                 (
                     "OAuth could not be completed in this connection mode. "
-                    "Run `fast-agent auth login <server-name-or-identity>` on the fast-agent host, "
+                    "Run `fast-agent auth login <server-name-or-mcp-name>` on the fast-agent host, "
                     "then retry `/mcp connect ...`."
                 ),
                 channel="warning",

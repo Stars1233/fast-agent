@@ -611,8 +611,8 @@ def command_completions(
 
         if not parts:
             subcommands = {
-                "list": "List sessions for a server identity and highlight active session",
-                "jar": "Show all stored sessions grouped by server identity",
+                "list": "List sessions for a server/mcp name and highlight active session",
+                "jar": "Show all stored sessions grouped by target/mcp name",
                 "new": "Create a new MCP session",
                 "use": "Switch active session to an existing session id",
                 "clear": "Clear one session entry or the full local store",
