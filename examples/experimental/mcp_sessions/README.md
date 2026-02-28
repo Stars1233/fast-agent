@@ -27,6 +27,13 @@ Shared helpers live in `_session_base.py`.
   - tools: `hashcheck_store(text)`, `hashcheck_verify(text)`, `hashcheck_list()`, `hashcheck_delete(text)`
 - `selective_session_server.py` — mixed public + session-only tools
   - tools: `public_echo`, `session_start`, `session_reset`, `session_counter_inc`, `session_counter_get`
+- `client_notes_server.py` — client-managed notes encoded in session `state`
+  - tools: `client_notes_add`, `client_notes_list`, `client_notes_clear`, `client_notes_status`
+
+State behavior in this demo set is intentionally mixed:
+
+- `session_server.py` and `client_notes_server.py` emit/update `state`
+- `session_required`, `notebook`, `hashcheck`, and `selective` omit `state`
 
 ## Run
 

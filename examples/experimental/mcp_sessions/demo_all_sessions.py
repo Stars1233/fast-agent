@@ -167,15 +167,33 @@ async def demo_selective() -> None:
     )
 
 
+async def demo_client_notes() -> None:
+    await _run_demo(
+        "DEMO 5: client-notes (notes encoded in session state)",
+        "client-notes",
+        "client_notes_server.py",
+        [
+            ("add: buy milk", "client_notes_add", {"text": "buy milk"}),
+            ("add: review PR", "client_notes_add", {"text": "review PR"}),
+            ("list client notes", "client_notes_list", {}),
+            ("status", "client_notes_status", {}),
+            ("clear notes", "client_notes_clear", {}),
+            ("list after clear", "client_notes_list", {}),
+        ],
+    )
+
+
 DEMOS = {
     "1": demo_session_required,
     "2": demo_notebook,
     "3": demo_hashcheck,
     "4": demo_selective,
+    "5": demo_client_notes,
     "session-required": demo_session_required,
     "notebook": demo_notebook,
     "hashcheck": demo_hashcheck,
     "selective": demo_selective,
+    "client-notes": demo_client_notes,
 }
 
 
@@ -193,10 +211,12 @@ async def main() -> None:
             "2",
             "3",
             "4",
+            "5",
             "session-required",
             "notebook",
             "hashcheck",
             "selective",
+            "client-notes",
         ],
         help="Which demo to run (default: all — runs sequentially via subprocesses)",
     )
@@ -204,7 +224,7 @@ async def main() -> None:
 
     if args.demo == "all":
         # Run each demo as a separate subprocess to avoid uvloop child-watcher issue
-        for num in ["1", "2", "3", "4"]:
+        for num in ["1", "2", "3", "4", "5"]:
             proc = await asyncio.create_subprocess_exec(
                 sys.executable, str(Path(__file__)), num,
                 stdout=None, stderr=None,  # inherit parent stdio

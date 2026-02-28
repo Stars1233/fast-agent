@@ -48,7 +48,7 @@ class NotebookStore:
 
 def build_server() -> FastMCP:
     mcp = FastMCP("notebook", log_level="WARNING")
-    sessions = SessionStore()
+    sessions = SessionStore(include_state=False)
     notebooks = NotebookStore()
     register_session_handlers(mcp._mcp_server, sessions)
 

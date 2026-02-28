@@ -62,7 +62,7 @@ class HashStore:
 
 def build_server() -> FastMCP:
     mcp = FastMCP("hashcheck", log_level="WARNING")
-    sessions = SessionStore()
+    sessions = SessionStore(include_state=False)
     hashes = HashStore()
     register_session_handlers(mcp._mcp_server, sessions)
 

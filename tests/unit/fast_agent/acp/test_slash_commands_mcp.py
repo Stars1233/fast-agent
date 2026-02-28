@@ -25,7 +25,6 @@ class _Agent:
                     server_name="local",
                     server_identity="demo-server",
                     target="cmd:python demo.py",
-                    target=None,
                     cookie={"id": "sess-1"},
                     cookies=(
                         {

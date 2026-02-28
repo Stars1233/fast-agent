@@ -50,7 +50,7 @@ def _resolve_session_title(label: str | None) -> str:
 
 def build_server() -> FastMCP:
     mcp = FastMCP("selective-session", log_level="WARNING")
-    sessions = SessionStore()
+    sessions = SessionStore(include_state=False)
     counters = SessionCounterStore()
     register_session_handlers(mcp._mcp_server, sessions)
 

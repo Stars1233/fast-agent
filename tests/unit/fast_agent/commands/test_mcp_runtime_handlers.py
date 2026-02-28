@@ -994,7 +994,7 @@ async def test_handle_mcp_session_jar_renders_compact_rows() -> None:
     message_text = "\n".join(str(msg.text) for msg in outcome.messages)
     assert "▎ MCP session jar (1 target):" in message_text
     assert "▎ demo • demo-server • connected" in message_text
-    assert "target: -" in message_text
+    assert "target: cmd: python demo.py" in message_text
     assert "demo-server" in message_text
     assert "cookies:" in message_text
     assert "▶ sess-123" in message_text
@@ -1016,14 +1016,14 @@ async def test_handle_mcp_session_list_marks_active_session() -> None:
     )
 
     message_text = "\n".join(str(msg.text) for msg in outcome.messages)
-    assert "target: -" in message_text
+    assert "target: cmd: python demo.py" in message_text
     assert "[ 1]" in message_text
     assert "[ 2]" in message_text
     assert "▶ sess-123" in message_text
     assert "• sess-abc" in message_text
     assert "(23/02/26 10:00 → 23/02/26 12:34)" in message_text
     assert "mcp name: demo-server" in message_text
-    assert "target: -" in message_text
+    assert "target: cmd: python demo.py" in message_text
     assert "cookies: 2" in message_text
     assert "store: 162 bytes" in message_text
     assert "store: 98 bytes" in message_text

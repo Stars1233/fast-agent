@@ -122,6 +122,48 @@ def test_update_experimental_session_cookie_from_meta_and_revocation() -> None:
     assert session.experimental_session_id is None
 
 
+def test_update_experimental_session_cookie_without_state_keeps_session_only() -> None:
+    session = _new_session()
+
+    session._update_experimental_session_cookie(
+        {
+            "io.modelcontextprotocol/session": {
+                "sessionId": "sess-no-state",
+                "expiresAt": "2026-03-01T00:00:00Z",
+            }
+        }
+    )
+
+    assert session.experimental_session_cookie == {
+        "sessionId": "sess-no-state",
+        "expiresAt": "2026-03-01T00:00:00Z",
+    }
+
+
+def test_update_experimental_session_cookie_without_state_does_not_mutate_existing_state() -> None:
+    session = _new_session()
+    session._experimental_session_cookie = {
+        "sessionId": "sess-xyz",
+        "state": "state-1",
+        "expiresAt": "2026-03-01T00:00:00Z",
+    }
+
+    session._update_experimental_session_cookie(
+        {
+            "io.modelcontextprotocol/session": {
+                "sessionId": "sess-xyz",
+                "expiresAt": "2026-03-01T12:00:00Z",
+            }
+        }
+    )
+
+    assert session.experimental_session_cookie == {
+        "sessionId": "sess-xyz",
+        "state": "state-1",
+        "expiresAt": "2026-03-01T12:00:00Z",
+    }
+
+
 def test_maybe_advertise_experimental_session_capability_disabled_by_default() -> None:
     session = _new_session()
     session.server_config = MCPServerSettings(name="demo", transport="http", url="http://example.com")

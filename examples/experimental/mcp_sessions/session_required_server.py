@@ -21,7 +21,7 @@ from mcp.server.fastmcp import Context, FastMCP
 
 def build_server() -> FastMCP:
     mcp = FastMCP("session-required", log_level="WARNING")
-    sessions = SessionStore()
+    sessions = SessionStore(include_state=False)
     register_session_handlers(mcp._mcp_server, sessions)
 
     @mcp.tool(name="echo")

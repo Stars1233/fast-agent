@@ -83,7 +83,7 @@ class DataLayerServerSession(ServerSession):
 @dataclass(slots=True)
 class SessionRecord:
     session_id: str
-    state: str
+    state: str | None
     expires_at: str
     label: str
     tool_calls: int = 0
@@ -94,13 +94,15 @@ class SessionStore:
     """Small in-memory store used by experimental demo servers."""
 
     _sessions: dict[str, SessionRecord] = field(default_factory=dict)
+    include_state: bool = True
 
     def create(self, title: str = "experimental-session", *, reason: str = "") -> SessionRecord:
         del reason
         session_id = f"sess-{secrets.token_hex(6)}"
+        initial_state = _encode_state(call_count=0) if self.include_state else None
         record = SessionRecord(
             session_id=session_id,
-            state=_encode_state(call_count=0),
+            state=initial_state,
             expires_at=_future_expiry(minutes=30),
             label=title,
         )
@@ -118,15 +120,18 @@ class SessionStore:
         return self._sessions.pop(session_id, None) is not None
 
     def to_metadata(self, record: SessionRecord) -> dict[str, str]:
-        return {
+        metadata: dict[str, str] = {
             "sessionId": record.session_id,
-            "state": record.state,
             "expiresAt": record.expires_at,
         }
+        if self.include_state and isinstance(record.state, str) and record.state:
+            metadata["state"] = record.state
+        return metadata
 
     def touch(self, record: SessionRecord) -> None:
         record.tool_calls += 1
-        record.state = _encode_state(call_count=record.tool_calls)
+        if self.include_state:
+            record.state = _encode_state(call_count=record.tool_calls)
         record.expires_at = _future_expiry(minutes=30)
 
 

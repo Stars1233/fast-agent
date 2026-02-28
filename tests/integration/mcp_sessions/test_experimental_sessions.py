@@ -21,9 +21,9 @@ def _repo_root() -> Path:
 
 
 
-def _server_settings(server_name: str) -> MCPServerSettings:
+def _server_settings(server_name: str, *, script: str = "session_server.py") -> MCPServerSettings:
     repo_root = _repo_root()
-    server_script = repo_root / "examples" / "experimental" / "mcp_sessions" / "session_server.py"
+    server_script = repo_root / "examples" / "experimental" / "mcp_sessions" / script
     return MCPServerSettings(
         name=server_name,
         transport="stdio",
@@ -34,9 +34,9 @@ def _server_settings(server_name: str) -> MCPServerSettings:
 
 
 
-def _build_context(server_name: str) -> Context:
+def _build_context(server_name: str, *, script: str = "session_server.py") -> Context:
     registry = ServerRegistry()
-    registry.registry = {server_name: _server_settings(server_name)}
+    registry.registry = {server_name: _server_settings(server_name, script=script)}
     return Context(server_registry=registry)
 
 
@@ -168,5 +168,40 @@ async def test_experimental_session_delete_then_recreate() -> None:
                 {"note": "after-recreate"},
             )
             assert "session active" in _tool_text(result)
+    finally:
+        await _shutdown_logging_bus()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_experimental_session_cookie_omits_state_when_server_does_not_send_it() -> None:
+    server_name = "experimental_sessions_notebook"
+    context = _build_context(server_name, script="notebook_server.py")
+    aggregator = MCPAggregator(
+        server_names=[server_name],
+        connection_persistence=True,
+        context=context,
+        name="integration-agent",
+    )
+
+    try:
+        async with aggregator:
+            status_before = (await aggregator.collect_server_status())[server_name]
+            cookie_before = status_before.session_cookie
+            assert isinstance(cookie_before, dict)
+            assert isinstance(cookie_before.get("sessionId"), str)
+            assert "state" not in cookie_before
+
+            result = await aggregator.call_tool(
+                "notebook_status",
+                {},
+            )
+            assert "Session" in _tool_text(result)
+
+            status_after = (await aggregator.collect_server_status())[server_name]
+            cookie_after = status_after.session_cookie
+            assert isinstance(cookie_after, dict)
+            assert cookie_after.get("sessionId") == cookie_before.get("sessionId")
+            assert "state" not in cookie_after
     finally:
         await _shutdown_logging_bus()
