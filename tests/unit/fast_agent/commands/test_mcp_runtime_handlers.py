@@ -60,6 +60,7 @@ class _SessionClientStub:
             SessionJarEntry(
                 server_name="demo",
                 server_identity="demo-server",
+                target="cmd:python demo.py",
                 cookie={"sessionId": "sess-123", "data": {"title": "Demo"}},
                 cookies=(
                     {
@@ -788,7 +789,7 @@ async def test_handle_mcp_session_jar_renders_compact_rows() -> None:
     assert "[ 1]" in message_text
     assert "demo-server" in message_text
     assert "connected" in message_text
-    assert "active: sess-123" in message_text
+    assert "session: sess-123" in message_text
     assert "sessions" in message_text
     assert "cookies:" in message_text
 
@@ -814,7 +815,7 @@ async def test_handle_mcp_session_list_marks_active_session() -> None:
     assert "▶ sess-123" in message_text
     assert "• sess-abc" in message_text
     assert "(23/02/26 10:00 → 23/02/26 12:34)" in message_text
-    assert "identity: demo-server" in message_text
+    assert "mcp name: demo-server" in message_text
     assert "cookies: 2" in message_text
 
 

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from fast_agent.config import MCPServerSettings
 from fast_agent.mcp.experimental_session_client import (
     ExperimentalSessionClient,
     InMemorySessionCookieStore,
@@ -39,17 +40,25 @@ class _SessionStub:
 
 
 class _ServerConnStub:
-    def __init__(self, session: _SessionStub) -> None:
+    def __init__(self, session: _SessionStub, server_config: MCPServerSettings | None = None) -> None:
         self.session = session
+        self.server_config = server_config
 
 
 class _ManagerStub:
-    def __init__(self, sessions: dict[str, _SessionStub]) -> None:
+    def __init__(self, sessions: dict[str, _SessionStub], configs: dict[str, MCPServerSettings] | None = None) -> None:
         self._sessions = sessions
+        self.running_servers: dict[str, _ServerConnStub] = {
+            name: _ServerConnStub(
+                session,
+                (configs or {}).get(name),
+            )
+            for name, session in sessions.items()
+        }
 
     async def get_server(self, server_name: str, client_session_factory=None):
         del client_session_factory
-        return _ServerConnStub(self._sessions[server_name])
+        return self.running_servers[server_name]
 
 
 class _AggregatorStub:
@@ -261,6 +270,31 @@ def test_bootstrap_cookie_for_server_prefers_identity_record() -> None:
         "sessionId": "sess-new",
         "data": {"title": "Latest"},
     }
+
+
+@pytest.mark.asyncio
+async def test_create_session_keys_store_by_target_before_identity() -> None:
+    aggregator = _AggregatorStub()
+    aggregator._manager = _ManagerStub(
+        aggregator._sessions,
+        {
+            "alpha": MCPServerSettings(
+                name="alpha",
+                transport="stdio",
+                command="python",
+                args=["/tmp/session_server.py"],
+                cwd="/workspace",
+            )
+        },
+    )
+    store = InMemorySessionCookieStore()
+    client = ExperimentalSessionClient(aggregator, cookie_store=store)
+
+    _server_name, _cookie = await client.create_session("alpha", title="Demo")
+
+    payload = store.load()
+    assert "cmd:python /tmp/session_server.py @ /workspace" in payload
+    assert "demo-alpha" not in payload
 
 
 def test_mark_cookie_invalidated_clears_last_used_and_skips_bootstrap() -> None:
