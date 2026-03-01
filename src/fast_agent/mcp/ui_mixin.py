@@ -100,19 +100,38 @@ class McpUIMixin:
         model: str | None = None,
         additional_message: "Text" | None = None,
         render_markdown: bool | None = None,
+        show_hook_indicator: bool | None = None,
+        render_message: bool = True,
     ) -> None:
         """Override to display UI resources after showing assistant message."""
         # Show the assistant message normally via parent
-        await super().show_assistant_message(  # type: ignore
-            message,
-            bottom_items,
-            highlight_items,
-            max_item_length,
-            name=name,
-            model=model,
-            additional_message=additional_message,
-            render_markdown=render_markdown,
-        )
+        try:
+            await super().show_assistant_message(  # type: ignore
+                message,
+                bottom_items,
+                highlight_items,
+                max_item_length,
+                name=name,
+                model=model,
+                additional_message=additional_message,
+                render_markdown=render_markdown,
+                show_hook_indicator=show_hook_indicator,
+                render_message=render_message,
+            )
+        except TypeError as exc:
+            error_text = str(exc)
+            if "show_hook_indicator" not in error_text and "render_message" not in error_text:
+                raise
+            await super().show_assistant_message(  # type: ignore
+                message,
+                bottom_items,
+                highlight_items,
+                max_item_length,
+                name=name,
+                model=model,
+                additional_message=additional_message,
+                render_markdown=render_markdown,
+            )
 
         # Handle any pending UI resources from the previous user message
         if self._ui_mode != "disabled":
