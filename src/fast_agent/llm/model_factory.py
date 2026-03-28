@@ -220,6 +220,36 @@ def _parse_query_overrides(
     query_params: Mapping[str, list[str]],
     model_spec: str,
 ) -> ModelQueryOverrides:
+    supported_keys = {
+        "reasoning",
+        "verbosity",
+        "structured",
+        "instant",
+        "context",
+        "transport",
+        "service_tier",
+        "web_search",
+        "web_fetch",
+        "temperature",
+        "temp",
+        "top_p",
+        "topP",
+        "top_k",
+        "topK",
+        "min_p",
+        "minP",
+        "presence_penalty",
+        "presencePenalty",
+        "repetition_penalty",
+        "repetitionPenalty",
+    }
+    unsupported_keys = sorted(set(query_params) - supported_keys)
+    if unsupported_keys:
+        joined = ", ".join(f"'{key}'" for key in unsupported_keys)
+        raise ModelConfigError(
+            f"Unsupported model query parameter(s) {joined} in '{model_spec}'"
+        )
+
     reasoning_effort: ReasoningEffortSetting | None = None
     text_verbosity: TextVerbosityLevel | None = None
     structured_output_mode: StructuredOutputMode | None = None
@@ -678,7 +708,6 @@ class ModelFactory:
 
         _validate_transport_constraints(provider, model_name, merged_overrides.transport)
         _validate_service_tier_constraints(provider, model_name, merged_overrides.service_tier)
-
         return ParsedModelSpec(
             raw_input=raw_input,
             expanded_input=expanded_model_spec,
@@ -740,6 +769,10 @@ class ModelFactory:
                 provider=parsed.provider,
                 model_name=parsed.model_name,
             )
+        wire_model_name = ModelDatabase.resolve_wire_model_name(
+            provider=parsed.provider,
+            model_name=parsed.model_name,
+        )
 
         return ResolvedModelSpec(
             raw_input=model_string,
@@ -747,7 +780,7 @@ class ModelFactory:
             source=source,
             model_config=model_config,
             provider=model_config.provider,
-            wire_model_name=model_config.model_name,
+            wire_model_name=wire_model_name,
             overlay=selected_overlay,
             model_params=model_params,
         )
@@ -814,6 +847,12 @@ class ModelFactory:
                 from fast_agent.llm.provider.anthropic.llm_anthropic import AnthropicLLM
 
                 return AnthropicLLM
+            if provider == Provider.ANTHROPIC_VERTEX:
+                from fast_agent.llm.provider.anthropic.llm_anthropic_vertex import (
+                    AnthropicVertexLLM,
+                )
+
+                return AnthropicVertexLLM
             if provider == Provider.OPENAI:
                 from fast_agent.llm.provider.openai.llm_openai import OpenAILLM
 

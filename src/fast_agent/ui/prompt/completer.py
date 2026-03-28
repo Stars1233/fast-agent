@@ -11,6 +11,7 @@ from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
+from urllib.parse import unquote
 
 from mcp.types import ResourceTemplate
 from prompt_toolkit.completion import Completer, Completion
@@ -21,6 +22,11 @@ from fast_agent.commands.handlers import model as model_handlers
 from fast_agent.config import get_settings
 from fast_agent.llm.reasoning_effort import available_reasoning_values
 from fast_agent.llm.text_verbosity import available_text_verbosity_values
+from fast_agent.ui.prompt.attachment_tokens import (
+    FILE_MENTION_SERVER,
+    URL_MENTION_SERVER,
+    encode_local_attachment_reference,
+)
 from fast_agent.ui.prompt.resource_mentions import template_argument_names
 
 if TYPE_CHECKING:
@@ -62,11 +68,13 @@ class AgentCompleter(Completer):
         current_agent: str | None = None,
         agent_provider: "AgentApp | None" = None,
         noenv_mode: bool = False,
+        cwd: Path | None = None,
     ) -> None:
         self.agents = agents
         self.current_agent = current_agent
         self.agent_provider = agent_provider
         self.noenv_mode = noenv_mode
+        self.cwd = cwd
         # Map commands to their descriptions for better completion hints
         self.commands = {
             "mcp": "Manage MCP runtime servers (/mcp list|connect|disconnect|reconnect|session)",
@@ -90,6 +98,7 @@ class AgentCompleter(Completer):
                 "(/cards, /cards add, /cards remove, /cards update, /cards publish, /cards registry)"
             ),
             "prompt": "Load a Prompt File or use MCP Prompt",
+            "attach": "Stage file path or remote URL attachment token(s) for the next prompt",
             "system": "Show the current system prompt",
             "usage": "Show current usage statistics",
             "markdown": "Show last assistant message without markdown formatting",
@@ -150,6 +159,9 @@ class AgentCompleter(Completer):
 
         raw_dir = raw_dir or "."
         expanded_dir = Path(os.path.expandvars(os.path.expanduser(raw_dir)))
+        if not expanded_dir.is_absolute():
+            expanded_dir = (self.cwd or Path.cwd()) / expanded_dir
+        expanded_dir = expanded_dir.resolve(strict=False)
         if not expanded_dir.exists() or not expanded_dir.is_dir():
             return None
 
@@ -652,6 +664,51 @@ class AgentCompleter(Completer):
                 count += 1
         except (PermissionError, FileNotFoundError, NotADirectoryError):
             pass
+
+    def _complete_local_attachment_paths(self, partial: str) -> list[Completion]:
+        decoded_partial = unquote(partial)
+        if decoded_partial.lower().startswith("file://"):
+            from fast_agent.ui.prompt.attachment_tokens import normalize_local_attachment_reference
+
+            try:
+                decoded_partial = str(
+                    normalize_local_attachment_reference(decoded_partial, cwd=self.cwd)
+                )
+            except ValueError:
+                return []
+
+        resolved = self._resolve_completion_search(decoded_partial)
+        if not resolved:
+            return []
+
+        search_dir = resolved.search_dir
+        prefix = resolved.prefix
+        completion_prefix = resolved.completion_prefix
+        completions: list[Completion] = []
+        try:
+            for entry in sorted(search_dir.iterdir()):
+                name = entry.name
+                if name.startswith(".") and not prefix.startswith("."):
+                    continue
+                if not name.lower().startswith(prefix.lower()):
+                    continue
+
+                completion_text = f"{completion_prefix}{name}" if completion_prefix else name
+                if entry.is_dir():
+                    completion_text += "/"
+
+                completions.append(
+                    Completion(
+                        encode_local_attachment_reference(completion_text),
+                        start_position=-len(partial),
+                        display=name + ("/" if entry.is_dir() else ""),
+                        display_meta="directory" if entry.is_dir() else "file",
+                    )
+                )
+        except (PermissionError, FileNotFoundError, NotADirectoryError):
+            return []
+
+        return completions
 
     def _complete_subcommands(
         self,
@@ -1267,13 +1324,24 @@ class AgentCompleter(Completer):
                 return list(cached)
 
             server_names = self._run_async_completion(self._list_connected_resource_servers()) or []
+            server_names = list(
+                dict.fromkeys([*server_names, FILE_MENTION_SERVER, URL_MENTION_SERVER])
+            )
             partial = context.partial.lower()
             completions = [
                 Completion(
                     f"{server_name}:",
                     start_position=-len(context.partial),
                     display=server_name,
-                    display_meta="connected mcp server (resources)",
+                    display_meta=(
+                        "local file attachment"
+                        if server_name == FILE_MENTION_SERVER
+                        else (
+                            "remote URL attachment"
+                            if server_name == URL_MENTION_SERVER
+                            else "connected mcp server (resources)"
+                        )
+                    ),
                 )
                 for server_name in server_names
                 if not partial or server_name.lower().startswith(partial)
@@ -1285,6 +1353,21 @@ class AgentCompleter(Completer):
             return []
 
         if context.kind == "resource":
+            if context.server_name == FILE_MENTION_SERVER:
+                return self._complete_local_attachment_paths(context.partial)
+            if context.server_name == URL_MENTION_SERVER:
+                prefix = context.partial.lower()
+                return [
+                    Completion(
+                        scheme,
+                        start_position=-len(context.partial),
+                        display=scheme,
+                        display_meta="remote URL attachment",
+                    )
+                    for scheme in ("https://", "http://")
+                    if not prefix or scheme.startswith(prefix)
+                ]
+
             cache_key = (
                 "resource",
                 self.current_agent,

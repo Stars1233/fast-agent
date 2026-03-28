@@ -61,6 +61,7 @@ from fast_agent.ui.enhanced_prompt import (
 from fast_agent.ui.interactive_diagnostics import write_interactive_trace
 from fast_agent.ui.interactive_shell import ShellExecutionResult, run_interactive_shell_command
 from fast_agent.ui.progress_display import progress_display
+from fast_agent.ui.prompt.input import resolve_shell_working_dir
 from fast_agent.ui.prompt.resource_mentions import (
     build_prompt_with_resources,
     parse_mentions,
@@ -573,7 +574,11 @@ class InteractivePrompt:
             hash_send_quiet=dispatch_result.hash_send_quiet,
             shell_execute_cmd=dispatch_result.shell_execute_cmd,
         )
-        next_buffer_prefill = dispatch_result.buffer_prefill or buffer_prefill
+        next_buffer_prefill = (
+            dispatch_result.buffer_prefill
+            if dispatch_result.buffer_prefill is not None
+            else buffer_prefill
+        )
         should_continue = dispatch_result.handled and not pending.has_pending_execution()
         return next_state, pending, next_buffer_prefill, should_continue
 
@@ -732,6 +737,11 @@ class InteractivePrompt:
                         agent_names=agent_names,
                         pinned_agent=pinned_agent,
                     ),
+                    buffer_prefill=buffer_prefill,
+                    shell_working_dir=resolve_shell_working_dir(
+                        agent_name=agent_state.current_agent,
+                        agent_provider=prompt_provider,
+                    ),
                 )
             except KeyboardInterrupt:
                 self._handle_ctrl_c_interrupt(
@@ -866,7 +876,10 @@ class InteractivePrompt:
         user_input: str,
     ) -> str | PromptMessageExtended | None:
         prompt_payload: str | PromptMessageExtended = user_input
-        parsed_mentions = parse_mentions(user_input)
+        parsed_mentions = parse_mentions(
+            user_input,
+            cwd=resolve_shell_working_dir(agent_name=agent_name, agent_provider=prompt_provider),
+        )
         for warning in parsed_mentions.warnings:
             rich_print(f"[yellow]{warning}[/yellow]")
 
@@ -877,14 +890,14 @@ class InteractivePrompt:
             agent_for_mentions = prompt_provider._agent(agent_name)
         except Exception:
             rich_print(f"[red]Unable to resolve resource mentions: agent '{agent_name}' unavailable[/red]")
-            return None
+            return user_input
 
         try:
             resolved_mentions = await resolve_mentions(agent_for_mentions, parsed_mentions)
             return build_prompt_with_resources(user_input, resolved_mentions)
         except Exception as exc:
             rich_print(f"[red]Failed to resolve resource mentions: {exc}[/red]")
-            return None
+            return user_input
 
     async def _send_regular_message(
         self,

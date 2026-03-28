@@ -8,6 +8,7 @@ from prompt_toolkit.completion import Completion
 
 from fast_agent.agents.agent_types import AgentType
 from fast_agent.llm.model_selection import ModelSelectionCatalog
+from fast_agent.utils.commandline import join_commandline, split_commandline
 
 if TYPE_CHECKING:
     from fast_agent.ui.prompt.completer import AgentCompleter
@@ -182,6 +183,77 @@ def _prompt_command_completions(
 
     partial = text[len("/prompt load ") :]
     return list(completer._complete_history_files(partial))
+
+
+def _attach_command_completions(
+    completer: "AgentCompleter",
+    text: str,
+    text_lower: str,
+) -> list[Completion] | None:
+    if not text_lower.startswith("/attach "):
+        return None
+
+    remainder = text[len("/attach ") :]
+    if not remainder:
+        results = [
+            Completion(
+                "clear",
+                start_position=0,
+                display="clear",
+                display_meta="remove staged file or URL attachments from the next draft buffer",
+            ),
+            Completion(
+                "https://",
+                start_position=0,
+                display="https://",
+                display_meta="stage a remote URL attachment for the next prompt",
+            )
+        ]
+        results.extend(list(completer._complete_shell_paths("", 0)))
+        return results
+
+    try:
+        parts = split_commandline(remainder)
+    except ValueError:
+        return []
+
+    if remainder.endswith((" ", "\t")):
+        partial = ""
+        token_count = len(parts)
+    else:
+        partial = parts[-1] if parts else remainder
+        token_count = len(parts) if parts else 1
+
+    results: list[Completion] = []
+    if token_count <= 1 and "clear".startswith(partial.lower()):
+        results.append(
+            Completion(
+                "clear",
+                start_position=-len(partial),
+                display="clear",
+                display_meta="remove staged file or URL attachments from the next draft buffer",
+            )
+        )
+    if token_count <= 1 and "https://".startswith(partial.lower()):
+        results.append(
+            Completion(
+                "https://",
+                start_position=-len(partial),
+                display="https://",
+                display_meta="stage a remote URL attachment for the next prompt",
+            )
+        )
+    for completion in completer._complete_shell_paths(partial, len(partial)):
+        completion_text = join_commandline([completion.text])
+        results.append(
+            Completion(
+                completion_text,
+                start_position=completion.start_position,
+                display=completion.display,
+                display_meta=completion.display_meta,
+            )
+        )
+    return results
 
 
 def _session_delete_completions(
@@ -947,6 +1019,10 @@ def command_completions(
     prompt_result = _prompt_command_completions(completer, text, text_lower)
     if prompt_result is not None:
         return prompt_result
+
+    attach_result = _attach_command_completions(completer, text, text_lower)
+    if attach_result is not None:
+        return attach_result
 
     session_result = _session_command_completions(completer, text, text_lower)
     if session_result is not None:

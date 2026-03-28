@@ -19,10 +19,10 @@ from fast_agent.commands.handlers import sessions as sessions_handlers
 from fast_agent.commands.handlers import skills as skills_handlers
 from fast_agent.commands.handlers import tools as tools_handlers
 from fast_agent.commands.handlers.shared import clear_agent_histories
-from fast_agent.commands.mcp_command_intents import build_mcp_connect_runtime_target
 from fast_agent.ui import enhanced_prompt
 from fast_agent.ui.command_payloads import (
     AgentCommand,
+    AttachCommand,
     CardsCommand,
     ClearCommand,
     ClearSessionsCommand,
@@ -70,11 +70,21 @@ from fast_agent.ui.command_payloads import (
     UnknownCommand,
 )
 from fast_agent.ui.history_display import display_history_show
+from fast_agent.ui.prompt.attachment_tokens import (
+    append_attachment_tokens,
+    build_local_attachment_token,
+    build_remote_attachment_token,
+    normalize_local_attachment_reference,
+    normalize_remote_attachment_reference,
+    strip_local_attachment_tokens,
+)
 
 from .command_context import build_command_context, emit_command_outcome
 from .mcp_connect_flow import handle_mcp_connect
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from fast_agent.core.agent_app import AgentApp
     from fast_agent.ui.interactive_prompt import InteractivePrompt
 
@@ -132,6 +142,9 @@ async def _dispatch_local_ui_payload(
     *,
     prompt_provider: "AgentApp",
     available_agents_set: set[str],
+    agent_name: str,
+    buffer_prefill: str,
+    shell_working_dir: Path | None = None,
 ) -> DispatchResult | None:
     result = DispatchResult(handled=True)
     match payload:
@@ -159,6 +172,51 @@ async def _dispatch_local_ui_payload(
             return result
         case ShellCommand(command=shell_cmd):
             result.shell_execute_cmd = shell_cmd
+            return result
+        case AttachCommand(paths=paths, clear=clear, error=error):
+            if error:
+                rich_print(f"[red]{error}[/red]")
+                return result
+
+            if clear:
+                result.buffer_prefill = strip_local_attachment_tokens(buffer_prefill)
+                return result
+
+            resolved_paths = list(paths)
+            if not resolved_paths:
+                context = build_command_context(prompt_provider, agent_name)
+                prompted_path = await context.io.prompt_text(
+                    "Attach file path or URL:",
+                    allow_empty=False,
+                )
+                if not prompted_path:
+                    result.buffer_prefill = buffer_prefill
+                    return result
+                resolved_paths = [prompted_path]
+
+            tokens: list[str] = []
+            for raw_path in resolved_paths:
+                try:
+                    if raw_path.strip().lower().startswith(("http://", "https://")):
+                        token = build_remote_attachment_token(
+                            normalize_remote_attachment_reference(raw_path)
+                        )
+                    else:
+                        attachment_path = normalize_local_attachment_reference(
+                            raw_path,
+                            cwd=shell_working_dir,
+                        )
+                        if not attachment_path.exists():
+                            raise FileNotFoundError(raw_path)
+                        if not attachment_path.is_file():
+                            raise IsADirectoryError(raw_path)
+                        token = build_local_attachment_token(attachment_path)
+                except Exception as exc:
+                    rich_print(f"[red]Unable to attach '{raw_path}': {exc}[/red]")
+                    continue
+                tokens.append(token)
+
+            result.buffer_prefill = append_attachment_tokens(buffer_prefill, tokens)
             return result
         case UnknownCommand(command=command):
             rich_print(f"[red]Command not found: {command}[/red]")
@@ -405,24 +463,20 @@ async def _dispatch_mcp_payload(
             )
             await emit_command_outcome(context, outcome)
             return result
-        case McpConnectCommand(
-            target_text=target_text,
-            server_name=server_name,
-            error=error,
-        ):
+        case McpConnectCommand(request=request, error=error):
             context = build_command_context(prompt_provider, agent)
             if error:
                 rich_print(f"[red]{error}[/red]")
                 return result
-            runtime_target = build_mcp_connect_runtime_target(payload)
+            if request is None:
+                rich_print("[red]Connection target is required[/red]")
+                return result
 
             outcome = await handle_mcp_connect(
                 context=context,
                 prompt_provider=prompt_provider,
                 agent=agent,
-                runtime_target=runtime_target,
-                target_text=target_text,
-                server_name=server_name,
+                request=request,
             )
             if outcome is not None:
                 await emit_command_outcome(context, outcome)
@@ -733,6 +787,8 @@ async def dispatch_command_payload(
     available_agents: list[str],
     available_agents_set: set[str],
     merge_pinned_agents: Callable[[list[str]], list[str]],
+    buffer_prefill: str = "",
+    shell_working_dir: Path | None = None,
 ) -> DispatchResult:
     del available_agents
 
@@ -740,6 +796,9 @@ async def dispatch_command_payload(
         payload,
         prompt_provider=prompt_provider,
         available_agents_set=available_agents_set,
+        agent_name=agent,
+        buffer_prefill=buffer_prefill,
+        shell_working_dir=shell_working_dir,
     )
     if local_result is not None:
         return local_result

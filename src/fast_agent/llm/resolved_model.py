@@ -298,12 +298,4 @@ def resolve_base_model_params(
     model_name: str,
 ) -> ModelParameters | None:
     """Resolve base model metadata without preferring overlay runtime mutations."""
-    normalized = model_name.strip().lower()
-    if provider == Provider.HUGGINGFACE and ":" in normalized:
-        normalized = normalized.rsplit(":", 1)[0]
-
-    static_params = ModelDatabase.MODELS.get(normalized)
-    if static_params is not None:
-        return static_params
-
-    return ModelDatabase._RUNTIME_MODEL_PARAMS.get(normalized)
+    return ModelDatabase.get_model_params(model_name, provider=provider)

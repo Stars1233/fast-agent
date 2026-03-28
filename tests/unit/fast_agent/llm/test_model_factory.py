@@ -124,6 +124,23 @@ def test_model_query_structured_tool_use():
     assert config.structured_output_mode == "tool_use"
 
 
+def test_model_query_unknown_parameter_is_rejected() -> None:
+    with pytest.raises(ModelConfigError, match="Unsupported model query parameter"):
+        ModelFactory.parse_model_string("claude-sonnet-4-6?routing=vertex")
+
+
+def test_explicit_anthropic_vertex_provider_namespace() -> None:
+    config = ModelFactory.parse_model_string("anthropic-vertex.claude-sonnet-4-6")
+
+    assert config.provider == Provider.ANTHROPIC_VERTEX
+    assert config.model_name == "claude-sonnet-4-6"
+
+
+def test_model_query_unknown_parameter_rejected_for_non_anthropic_model():
+    with pytest.raises(ModelConfigError, match="Unsupported model query parameter"):
+        ModelFactory.parse_model_string("openai.gpt-4.1?routing=vertex")
+
+
 def test_model_query_text_verbosity():
     config = ModelFactory.parse_model_string("gpt-5?verbosity=med&reasoning=high")
     assert config.provider == Provider.RESPONSES
@@ -532,6 +549,8 @@ def test_gemini31_alias_resolves_to_google_31_preview():
 def test_curated_catalog_aliases_are_parseable():
     for entry in ModelSelectionCatalog.list_current_entries():
         if "?" in entry.model:
+            continue
+        if entry.model.startswith("anthropic-vertex."):
             continue
 
         alias_config = ModelFactory.parse_model_string(entry.alias)

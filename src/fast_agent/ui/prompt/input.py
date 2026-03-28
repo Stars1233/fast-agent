@@ -23,6 +23,7 @@ from rich import print as rich_print
 from rich.text import Text
 
 from fast_agent.agents.agent_types import AgentType
+from fast_agent.mcp.connect_targets import parse_connect_command_text
 from fast_agent.mcp.types import McpAgentProtocol
 from fast_agent.ui.command_payloads import (
     AgentCommand,
@@ -157,16 +158,28 @@ def _mcp_connect_cmd(
     force_reconnect: bool,
     error: str | None,
 ) -> McpConnectCommand:
+    del parsed_mode
+    if error or not target_text:
+        return McpConnectCommand(request=None, error=error)
+
+    argv = [target_text]
+    if server_name:
+        argv.extend(["--name", shlex.quote(server_name)])
+    if auth_token:
+        argv.extend(["--auth", shlex.quote(auth_token)])
+    if timeout_seconds is not None:
+        argv.extend(["--timeout", str(timeout_seconds)])
+    if trigger_oauth is True:
+        argv.append("--oauth")
+    elif trigger_oauth is False:
+        argv.append("--no-oauth")
+    if reconnect_on_disconnect is False:
+        argv.append("--no-reconnect")
+    if force_reconnect:
+        argv.append("--reconnect")
     return McpConnectCommand(
-        target_text=target_text,
-        parsed_mode=parsed_mode,
-        server_name=server_name,
-        auth_token=auth_token,
-        timeout_seconds=timeout_seconds,
-        trigger_oauth=trigger_oauth,
-        reconnect_on_disconnect=reconnect_on_disconnect,
-        force_reconnect=force_reconnect,
-        error=error,
+        request=parse_connect_command_text(" ".join(argv)),
+        error=None,
     )
 
 
@@ -469,6 +482,7 @@ def _build_toolbar(
     toolbar_color: str,
     agent_provider: "AgentApp | None",
     shell_context: ShellInputContext,
+    session_factory: "Callable[[], PromptSession]",
 ) -> "Callable[[], HTML]":
     shell_state = ShellToolbarState(
         enabled=shell_context.enabled,
@@ -478,6 +492,10 @@ def _build_toolbar(
 
     def get_toolbar() -> HTML:
         global _copy_notice
+        try:
+            current_input_text = session_factory().default_buffer.text
+        except Exception:
+            current_input_text = ""
         result = render_input_toolbar(
             agent_name=agent_name,
             toolbar_color=toolbar_color,
@@ -488,6 +506,7 @@ def _build_toolbar(
             copy_notice=_copy_notice,
             copy_notice_until=_copy_notice_until,
             shell_path_switch_delay_seconds=_SHELL_PATH_SWITCH_DELAY_SECONDS,
+            current_input_text=current_input_text,
         )
         shell_state.show_path_segment = result.show_shell_path_segment
         if result.clear_copy_notice:
@@ -623,6 +642,15 @@ def _resolve_shell_context(
     return shell_context, shell_agent
 
 
+def resolve_shell_working_dir(
+    *,
+    agent_name: str,
+    agent_provider: "AgentApp | None",
+) -> Path | None:
+    shell_context, _ = _resolve_shell_context(agent_name=agent_name, agent_provider=agent_provider)
+    return shell_context.working_dir
+
+
 def _build_prompt_text_resolver(
     *,
     session_factory: "Callable[[], PromptSession]",
@@ -691,7 +719,7 @@ def _show_input_help_banner(
     rich_print(
         """[dim]Use '/' for commands, '!' for shell. '#' to query, '@' to switch agents\n"""
         """CTRL+T multiline, CTRL+Y copy last message, CTRL+E external editor.\n"""
-        """CTRL+Space or Tab for path completion. '^' for resource attach.[/dim]"""
+        """CTRL+Space or Tab for path completion. Use /attach, `^file:`, or `^url:` for attachments. F10 to clear.[/dim]"""
     )
 
 
@@ -906,6 +934,7 @@ async def get_enhanced_input(
         toolbar_color=toolbar_color,
         agent_provider=agent_provider,
         shell_context=shell_context,
+        session_factory=session_factory,
     )
     session = create_prompt_session(
         history=agent_histories[agent_name],
@@ -916,6 +945,10 @@ async def get_enhanced_input(
             current_agent=agent_name,
             agent_provider=agent_provider,
             noenv_mode=noenv_mode,
+            cwd=resolve_shell_working_dir(
+                agent_name=agent_name,
+                agent_provider=agent_provider,
+            ),
         ),
         lexer=ShellPrefixLexer(),
         multiline_filter=Condition(lambda: in_multiline_mode),

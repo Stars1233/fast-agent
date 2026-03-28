@@ -36,9 +36,10 @@ from acp.schema import (
     AgentCapabilities,
     AgentMessageChunk,
     AuthenticateResponse,
-    AuthMethod,
+    AuthMethodAgent,
     AvailableCommandsUpdate,
     ClientCapabilities,
+    EnvVarAuthMethod,
     HttpMcpServer,
     Implementation,
     ListSessionsResponse,
@@ -54,6 +55,7 @@ from acp.schema import (
     SessionResumeCapabilities,
     SseMcpServer,
     StopReason,
+    TerminalAuthMethod,
     UserMessageChunk,
 )
 from acp.schema import (
@@ -452,10 +454,11 @@ class AgentACPServer(ACPAgent):
             from fast_agent.llm.provider_key_manager import ProviderKeyManager
 
             env_var = ProviderKeyManager.get_env_key_name(provider_name)
-            data["envVars"] = [env_var]
+            if env_var:
+                data["envVars"] = [env_var]
             if isinstance(provider_display_name, str) and provider_display_name:
                 data["provider"] = provider_display_name
-                if not data["details"]:
+                if not data["details"] and env_var:
                     data["details"] = (
                         f"Add the {provider_display_name} credentials to "
                         f"{ACP_AUTH_CONFIG_FILE} or set {env_var}."
@@ -568,11 +571,10 @@ class AgentACPServer(ACPAgent):
 
             # Minimal "agent auth" hint for ACP clients.
             #
-            # Per ACP RFD auth-methods, the default type is "agent" when no type is provided.
-            # We keep this strictly within the current AuthMethod schema (id/name/description)
-            # to avoid requiring client/SDK support for typed auth metadata yet.
-            auth_methods = [
-                AuthMethod(
+            # In ACP 0.9.x this uses the explicit agent auth schema, but we still
+            # keep it to the minimal id/name/description shape.
+            auth_methods: list[EnvVarAuthMethod | TerminalAuthMethod | AuthMethodAgent] = [
+                AuthMethodAgent(
                     id=ACP_AUTH_METHOD_ID,
                     name="Configure fast-agent",
                     description=(
@@ -2098,6 +2100,7 @@ class AgentACPServer(ACPAgent):
         self,
         prompt: list[ACPContentBlock],
         session_id: str,
+        message_id: str | None = None,
         **kwargs: Any,
     ) -> PromptResponse:
         """Handle prompt request.
@@ -2110,7 +2113,12 @@ class AgentACPServer(ACPAgent):
         """
         prompt_lock = await self._get_prompt_lock(session_id)
         async with prompt_lock:
-            return await self._prompt_locked(prompt=prompt, session_id=session_id, **kwargs)
+            return await self._prompt_locked(
+                prompt=prompt,
+                session_id=session_id,
+                message_id=message_id,
+                **kwargs,
+            )
 
     async def _get_prompt_lock(self, session_id: str) -> asyncio.Lock:
         """Get/create the lock used to serialize prompts for a session."""
@@ -2121,10 +2129,28 @@ class AgentACPServer(ACPAgent):
                 self._prompt_locks[session_id] = lock
             return lock
 
+    async def _send_prompt_user_updates(
+        self,
+        *,
+        session_id: str,
+        prompt: Sequence[ACPContentBlock],
+        message_id: str | None,
+    ) -> None:
+        """Acknowledge the accepted user turn through session updates."""
+        if not self._connection:
+            return
+
+        for block in prompt:
+            update = update_user_message(block)
+            if message_id:
+                update.message_id = message_id
+            await self._connection.session_update(session_id=session_id, update=update)
+
     async def _prompt_locked(
         self,
         prompt: list[ACPContentBlock],
         session_id: str,
+        message_id: str | None = None,
         **kwargs: Any,
     ) -> PromptResponse:
         """
@@ -2174,6 +2200,20 @@ class AgentACPServer(ACPAgent):
 
             # Inline resource URIs for slash commands (e.g., /card @file.txt)
             processed_prompt = inline_resources_for_slash_command(prompt)
+
+            if self._connection and processed_prompt:
+                try:
+                    await self._send_prompt_user_updates(
+                        session_id=session_id,
+                        prompt=processed_prompt,
+                        message_id=message_id,
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Error sending prompt acknowledgement update: {e}",
+                        name="acp_prompt_ack_update_error",
+                        exc_info=True,
+                    )
 
             # Convert ACP content blocks to MCP format
             mcp_content_blocks = convert_acp_prompt_to_mcp_content_blocks(processed_prompt)
@@ -2243,7 +2283,10 @@ class AgentACPServer(ACPAgent):
                         )
 
                 # Return success
-                return PromptResponse(stop_reason=END_TURN)
+                return PromptResponse(
+                    stop_reason=END_TURN,
+                    user_message_id=message_id,
+                )
 
             logger.info(
                 "Sending prompt to fast-agent",
@@ -2503,6 +2546,7 @@ class AgentACPServer(ACPAgent):
             return PromptResponse(
                 stop_reason=acp_stop_reason,
                 field_meta=status_line_meta,
+                user_message_id=message_id,
             )
         except asyncio.CancelledError:
             # Task was cancelled - return appropriate response
@@ -2513,7 +2557,10 @@ class AgentACPServer(ACPAgent):
                 name="acp_prompt_cancelled",
                 session_id=session_id,
             )
-            return PromptResponse(stop_reason="cancelled")
+            return PromptResponse(
+                stop_reason="cancelled",
+                user_message_id=message_id,
+            )
         finally:
             # Always remove session from active prompts and cleanup task
             write_interactive_trace("acp.prompt.finally", session_id=session_id)

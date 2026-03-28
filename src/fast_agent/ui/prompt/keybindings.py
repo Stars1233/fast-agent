@@ -11,7 +11,9 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.lexers import Lexer
 from rich import print as rich_print
 
+from fast_agent.ui.prompt.attachment_tokens import strip_local_attachment_tokens
 from fast_agent.ui.prompt.editor import get_text_from_editor
+from fast_agent.ui.prompt.parser import try_parse_hash_agent_command
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -25,12 +27,16 @@ class ShellPrefixLexer(Lexer):
     """Lexer that highlights shell (!) and comment (#) commands."""
 
     def lex_document(self, document):
+        first_line = document.lines[0] if document.lines else ""
+        first_stripped = first_line.lstrip()
+        first_line_is_shell = first_stripped.startswith("!")
+        first_line_is_hash_command = try_parse_hash_agent_command(first_stripped) is not None
+
         def get_line_tokens(line_number):
             line = document.lines[line_number]
-            stripped = line.lstrip()
-            if stripped.startswith("!"):
+            if line_number == 0 and first_line_is_shell:
                 return [("class:shell-command", line)]
-            if stripped.startswith("#"):
+            if line_number == 0 and first_line_is_hash_command:
                 return [("class:comment-command", line)]
             return [("", line)]
 
@@ -113,7 +119,9 @@ def create_keybindings(
             return True
         if stripped.startswith("!"):
             return True
-        if stripped.startswith(("/", "@", "#")):
+        if stripped.startswith(("/", "@")):
+            return True
+        if try_parse_hash_agent_command(stripped) is not None:
             return True
         return True
 
@@ -183,6 +191,18 @@ def create_keybindings(
     def _(event) -> None:
         if _invoke_callback(on_cycle_web_fetch, event):
             return
+
+    @kb.add("f10")
+    def _(event) -> None:
+        cleared = strip_local_attachment_tokens(event.current_buffer.text)
+        if cleared == event.current_buffer.text:
+            return
+        event.current_buffer.text = cleared
+        event.current_buffer.cursor_position = len(cleared)
+        if event.app:
+            event.app.invalidate()
+        elif app:
+            app.invalidate()
 
     @kb.add("c-m", filter=Condition(lambda: _has_any_completions()), eager=True)
     @kb.add("enter", filter=Condition(lambda: _has_any_completions()), eager=True)
